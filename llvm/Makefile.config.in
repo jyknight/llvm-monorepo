@@ -1,0 +1,208 @@
+#===-- Makefile.config - Local configuration for LLVM ------*- Makefile -*--===#
+#
+#                     The LLVM Compiler Infrastructure
+#
+# This file was developed by the LLVM research group and is distributed under
+# the University of Illinois Open Source License. See LICENSE.TXT for details.
+# 
+#===------------------------------------------------------------------------===#
+#
+# This file is included by Makefile.common.  It defines paths and other
+# values specific to a particular installation of LLVM.
+#
+#===------------------------------------------------------------------------===#
+
+# Define LLVM speific info and directories
+PACKAGE_NAME      := @PACKAGE_NAME@
+PACKAGE_VERSION   := @PACKAGE_VERSION@
+LLVM_PREFIX       := @LLVM_PREFIX@
+LLVM_BINDIR       := @LLVM_BINDIR@
+LLVM_LIBDIR       := @LLVM_LIBDIR@
+LLVM_DATADIR      := @LLVM_DATADIR@
+LLVM_DOCSDIR      := @LLVM_DOCSDIR@
+LLVM_ETCDIR       := @LLVM_ETCDIR@
+LLVM_INCLUDEDIR   := @LLVM_INCLUDEDIR@
+LLVM_INFODIR      := @LLVM_INFODIR@
+LLVM_MANDIR       := @LLVM_MANDIR@
+LLVM_CONFIGTIME   := @LLVM_CONFIGTIME@
+LLVM_TARBALL_NAME := @PACKAGE_NAME@-@PACKAGE_VERSION@
+
+# Target operating system for which LLVM will be compiled.
+OS=@OS@
+
+# Target hardware architecture
+ARCH=@ARCH@
+
+# Target triple (cpu-vendor-os) for which we should generate code
+TARGET_TRIPLE=@target@
+
+# Endian-ness of the target
+ENDIAN=@ENDIAN@
+
+# Path to the C++ compiler to use.  This is an optional setting, which defaults
+# to whatever your gmake defaults to.
+CXX = @CXX@
+
+# Path to the CC binary, which use used by testcases for native builds.
+CC := @CC@
+
+# Linker flags.
+LDFLAGS+=@LDFLAGS@
+
+# Libraries needed by tools
+TOOLLINKOPTS=@LIBS@
+
+# Path to the library archiver program.
+AR_PATH = @AR@
+
+# The pathnames of the programs we require to build
+BISON      := @BISON@
+DATE       := @DATE@
+FIND       := @FIND@
+FLEX       := @LEX@
+GREP       := @GREP@
+INSTALL    := @INSTALL@
+INSTALL_SH := $(BUILD_SRC_ROOT)/autoconf/install-sh
+INSTALL_PROGRAM = @INSTALL_PROGRAM@
+INSTALL_SCRIPT = @INSTALL_SCRIPT@
+INSTALL_DATA = @INSTALL_DATA@
+MKDIR      := @abs_top_srcdir@/autoconf/mkinstalldirs
+MV         := @MV@
+PAX        := @PAX@
+RANLIB     := @RANLIB@
+RM         := @RM@
+SED        := @SED@
+TAR        := @TAR@
+YACC       := @YACC@
+
+# Paths to miscellaneous programs we hope are present but might not be
+BZIP2      := @BZIP2@
+DOT        := @DOT@
+DOXYGEN    := @DOXYGEN@
+ETAGS      := @ETAGS@
+ETAGSFLAGS := @ETAGSFLAGS@
+GROFF      := @GROFF@
+GZIP       := @GZIP@
+POD2HTML   := @POD2HTML@
+POD2MAN    := @POD2MAN@
+PYTHON     := @PYTHON@
+RUNTEST    := @RUNTEST@
+TCLSH      := @TCLSH@
+ZIP        := @ZIP@
+
+# Paths to miscellaneous programs we assume are present
+RPWD       := pwd
+ECHO       := echo
+# Determine the target for which LLVM should generate code.
+LLVMGCCARCH := @target@/3.4-llvm
+
+# Full pathnames of LLVM C/C++ front-end 'cc1' and 'cc1plus' binaries:
+LCC1 = @LLVMCC1@
+LCC1XX = @LLVMCC1PLUS@
+
+# Path to directory where object files should be stored during a build.
+# Set OBJ_ROOT to "." if you do not want to use a separate place for
+# object files.
+OBJ_ROOT := .
+
+# Path to location for LLVM C/C++ front-end. You can modify this if you
+# want to override the value set by configure.
+LLVMGCCDIR := @LLVMGCCDIR@
+
+# These are options that can either be enabled here, or can be enabled on the
+# make command line (ie, make ENABLE_PROFILING=1):
+
+# When ENABLE_OPTIMIZED is enabled, Release builds of all of the LLVM code are
+# turned on, and Debug builds are turned off.
+#ENABLE_OPTIMIZED = 1
+@ENABLE_OPTIMIZED@
+
+# When ENABLE_PROFILING is enabled, the llvm source base is built with profile
+# information to allow gprof to be used to get execution frequencies.
+#ENABLE_PROFILING = 1
+
+# When ENABLE_DOXYGEN is enabled, the doxygen documentation will be built
+ENABLE_DOXYGEN = @ENABLE_DOXYGEN@
+
+# This option tells the Makefiles to produce verbose output.
+# It essentially prints the commands that make is executing
+#VERBOSE = 1
+
+# Enable JIT for this platform
+@JIT@
+
+# Shared library extension for this platform.
+SHLIBEXT = @SHLIBEXT@
+
+# Executable file extension for this platform.
+EXEEXT = @EXEEXT@
+
+###########################################################################
+# Directory Configuration
+#	This section of the Makefile determines what is where.  To be
+#	specific, there are several locations that need to be defined:
+#
+#	o LLVM_SRC_ROOT  : The root directory of the LLVM source code.
+#	o LLVM_OBJ_ROOT  : The root directory containing the built LLVM code.
+#
+#	o BUILD_SRC_DIR  : The directory containing the code to build.
+#	o BUILD_SRC_ROOT : The root directory of the code to build.
+#
+#	o BUILD_OBJ_DIR  : The directory in which compiled code will be placed.
+#	o BUILD_OBJ_ROOT : The root directory in which compiled code is placed.
+#
+###########################################################################
+
+# Set the object build directory.  By default, it is the current directory.
+ifndef BUILD_OBJ_DIR
+BUILD_OBJ_DIR := $(subst //,/,$(shell $(RPWD)))
+endif
+
+# Set the root of the object directory.
+ifndef BUILD_OBJ_ROOT
+BUILD_OBJ_ROOT := $(subst //,/,$(shell cd $(BUILD_OBJ_DIR)/$(LEVEL); $(RPWD)))
+endif
+
+# Set the source build directory.  That is almost always the current directory.
+ifndef BUILD_SRC_DIR
+BUILD_SRC_DIR := $(subst //,/,@abs_top_srcdir@/$(patsubst $(BUILD_OBJ_ROOT)%,%,$(BUILD_OBJ_DIR)))
+endif
+
+# Set the source root directory.
+ifndef BUILD_SRC_ROOT
+BUILD_SRC_ROOT := $(subst //,/,@abs_top_srcdir@)
+endif
+
+# Set the LLVM object directory.
+ifndef LLVM_OBJ_ROOT
+ifdef LLVM_SRC_ROOT
+LLVM_OBJ_ROOT := $(shell cd $(LLVM_SRC_ROOT); $(RPWD))
+else
+LLVM_OBJ_ROOT := $(BUILD_OBJ_ROOT)
+endif
+endif
+
+# Set the LLVM source directory.
+# It is typically the root directory of what we're compiling now.
+ifndef LLVM_SRC_ROOT
+LLVM_SRC_ROOT := $(BUILD_SRC_ROOT)
+endif
+
+# Installation directories, as provided by the configure script.
+abs_top_srcdir = @abs_top_srcdir@
+abs_top_builddir = @abs_top_builddir@
+exec_prefix = @exec_prefix@
+prefix = @prefix@
+program_transform_name = @program_transform_name@
+bindir = @bindir@
+sbindir = @sbindir@
+libexecdir = @libexecdir@
+datadir = @datadir@
+sysconfdir = @sysconfdir@
+sharedstatedir = @sharedstatedir@ 
+localstatedir = @localstatedir@
+libdir = @libdir@
+bytecode_libdir = $(LLVMGCCDIR)/bytecode-libs
+includedir = @includedir@
+infodir = @infodir@
+mandir = @mandir@
