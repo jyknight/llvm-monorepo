@@ -191,6 +191,12 @@ class TDDataStructures : public ModulePass {
   hash_map<Function*, DSGraph*> DSInfo;
   hash_set<Function*> ArgsRemainIncomplete;
   DSGraph *GlobalsGraph;
+
+  // --- RLB start ---
+  // SCCs of call graph, in reverse postorder
+  std::vector<DSGraph*> SCCs;
+  // --- RLB end ---
+
   BUDataStructures *BUInfo;
 
   /// GlobalECs - The equivalence classes for each global value that is merged
@@ -265,6 +271,12 @@ public:
     AU.setPreservesAll();
     AU.addRequired<BUDataStructures>();
   }
+
+  // --- RLB begin ---
+  typedef std::vector<DSGraph*>::const_iterator SCC_iterator;
+  SCC_iterator SCC_begin() const { return SCCs.begin(); }
+  SCC_iterator SCC_end() const { return SCCs.end(); }
+  // --- RLB end ---
 
 private:
   void markReachableFunctionsExternallyAccessible(DSNode *N,

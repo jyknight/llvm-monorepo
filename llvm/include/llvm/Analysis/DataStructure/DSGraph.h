@@ -437,9 +437,10 @@ public:
 
   void updateFromGlobalGraph();
 
-  /// computeNodeMapping - Given roots in two different DSGraphs, traverse the
-  /// nodes reachable from the two graphs, computing the mapping of nodes from
-  /// the first to the second graph.
+  /// computeNodeMapping - Given roots in two different DSGraphs,
+  /// traverse the nodes reachable from the two graphs, computing the
+  /// mapping of nodes from the first to the second graph.  Returns
+  /// true if mapping succeeded, false otherwise.
   ///
   static void computeNodeMapping(const DSNodeHandle &NH1,
                                  const DSNodeHandle &NH2, NodeMapTy &NodeMap,

@@ -271,7 +271,7 @@ static Value *RemapOperand(const Value *In,
   // Check to see if it's a constant that we are interesting in transforming.
   if (const Constant *CPV = dyn_cast<Constant>(In)) {
     if ((!isa<DerivedType>(CPV->getType()) && !isa<ConstantExpr>(CPV)) ||
-        isa<ConstantAggregateZero>(CPV))
+        isa<ConstantAggregateZero>(CPV) || isa<VectorType>(CPV->getType()))
       return const_cast<Constant*>(CPV);   // Simple constants stay identical.
 
     Constant *Result = 0;
