@@ -15,6 +15,7 @@
 #include "InstrInfoEmitter.h"
 #include "CodeGenTarget.h"
 #include "Record.h"
+#include <algorithm>
 using namespace llvm;
 
 // runEnums - Print out enum values for all of the instructions.
@@ -47,16 +48,6 @@ void InstrInfoEmitter::runEnums(std::ostream &OS) {
   OS << "} // End llvm namespace \n";
 }
 
-static std::vector<Record*> GetDefList(ListInit *LI, const std::string &Name) {
-  std::vector<Record*> Result;
-  for (unsigned i = 0, e = LI->getSize(); i != e; ++i)
-    if (DefInit *DI = dynamic_cast<DefInit*>(LI->getElement(i)))
-      Result.push_back(DI->getDef());
-    else
-      throw "Illegal value in '" + Name + "' list!";
-  return Result;
-}
-
 void InstrInfoEmitter::printDefList(const std::vector<Record*> &Uses,
                                     unsigned Num, std::ostream &OS) const {
   OS << "static const unsigned ImplicitList" << Num << "[] = { ";
@@ -86,6 +77,8 @@ static std::vector<Record*> GetOperandInfo(const CodeGenInstruction &Inst) {
 
 // run - Emit the main instruction description records for the target...
 void InstrInfoEmitter::run(std::ostream &OS) {
+  GatherItinClasses();
+
   EmitSourceFileHeader("Target Instruction Descriptors", OS);
   OS << "namespace llvm {\n\n";
 
@@ -99,26 +92,21 @@ void InstrInfoEmitter::run(std::ostream &OS) {
 
   // Keep track of all of the def lists we have emitted already.
   std::map<std::vector<Record*>, unsigned> EmittedLists;
-  std::map<ListInit*, unsigned> ListNumbers;
   unsigned ListNumber = 0;
  
   // Emit all of the instruction's implicit uses and defs.
   for (CodeGenTarget::inst_iterator II = Target.inst_begin(),
          E = Target.inst_end(); II != E; ++II) {
     Record *Inst = II->second.TheDef;
-    ListInit *LI = Inst->getValueAsListInit("Uses");
-    if (LI->getSize()) {
-      std::vector<Record*> Uses = GetDefList(LI, Inst->getName());
+    std::vector<Record*> Uses = Inst->getValueAsListOfDefs("Uses");
+    if (!Uses.empty()) {
       unsigned &IL = EmittedLists[Uses];
       if (!IL) printDefList(Uses, IL = ++ListNumber, OS);
-      ListNumbers[LI] = IL;
     }
-    LI = Inst->getValueAsListInit("Defs");
-    if (LI->getSize()) {
-      std::vector<Record*> Uses = GetDefList(LI, Inst->getName());
-      unsigned &IL = EmittedLists[Uses];
-      if (!IL) printDefList(Uses, IL = ++ListNumber, OS);
-      ListNumbers[LI] = IL;
+    std::vector<Record*> Defs = Inst->getValueAsListOfDefs("Defs");
+    if (!Defs.empty()) {
+      unsigned &IL = EmittedLists[Defs];
+      if (!IL) printDefList(Defs, IL = ++ListNumber, OS);
     }
   }
 
@@ -150,14 +138,14 @@ void InstrInfoEmitter::run(std::ostream &OS) {
   //
   OS << "\nstatic const TargetInstrDescriptor " << TargetName
      << "Insts[] = {\n";
-  emitRecord(Target.getPHIInstruction(), 0, InstrInfo, ListNumbers,
+  emitRecord(Target.getPHIInstruction(), 0, InstrInfo, EmittedLists,
              OperandInfosEmitted, OS);
 
   unsigned i = 0;
   for (CodeGenTarget::inst_iterator II = Target.inst_begin(),
          E = Target.inst_end(); II != E; ++II)
     if (II->second.TheDef != PHI)
-      emitRecord(II->second, ++i, InstrInfo, ListNumbers,
+      emitRecord(II->second, ++i, InstrInfo, EmittedLists,
                  OperandInfosEmitted, OS);
   OS << "};\n";
   OS << "} // End llvm namespace \n";
@@ -165,7 +153,7 @@ void InstrInfoEmitter::run(std::ostream &OS) {
 
 void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
                                   Record *InstrInfo,
-                                  std::map<ListInit*, unsigned> &ListNumbers,
+                         std::map<std::vector<Record*>, unsigned> &EmittedLists,
                                std::map<std::vector<Record*>, unsigned> &OpInfo,
                                   std::ostream &OS) {
   int NumOperands;
@@ -183,7 +171,13 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
     OS << Inst.TheDef->getName();
   else
     OS << Inst.Name;
-  OS << "\",\t" << NumOperands << ", -1, 0, false, 0, 0, 0, 0";
+  
+  unsigned ItinClass = !IsItineraries ? 0 :
+            ItinClassNumber(Inst.TheDef->getValueAsDef("Itinerary")->getName());
+  
+  OS << "\",\t" << NumOperands << ", -1, 0, false, 0, 0, "
+     << ItinClass
+     << ", 0";
 
   // Emit all of the target indepedent flags...
   if (Inst.isReturn)     OS << "|M_RET_FLAG";
@@ -215,17 +209,17 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
   OS << ", ";
 
   // Emit the implicit uses and defs lists...
-  LI = Inst.TheDef->getValueAsListInit("Uses");
-  if (!LI->getSize())
+  std::vector<Record*> UseList = Inst.TheDef->getValueAsListOfDefs("Uses");
+  if (UseList.empty())
     OS << "EmptyImpList, ";
   else
-    OS << "ImplicitList" << ListNumbers[LI] << ", ";
+    OS << "ImplicitList" << EmittedLists[UseList] << ", ";
 
-  LI = Inst.TheDef->getValueAsListInit("Defs");
-  if (!LI->getSize())
+  std::vector<Record*> DefList = Inst.TheDef->getValueAsListOfDefs("Defs");
+  if (DefList.empty())
     OS << "EmptyImpList, ";
   else
-    OS << "ImplicitList" << ListNumbers[LI] << ", ";
+    OS << "ImplicitList" << EmittedLists[DefList] << ", ";
 
   // Emit the operand info.
   std::vector<Record*> OperandInfo = GetOperandInfo(Inst);
@@ -235,6 +229,30 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
     OS << "OperandInfo" << OpInfo[OperandInfo];
   
   OS << " },  // Inst #" << Num << " = " << Inst.TheDef->getName() << "\n";
+}
+
+struct LessRecord {
+  bool operator()(const Record *Rec1, const Record *Rec2) const {
+    return Rec1->getName() < Rec2->getName();
+  }
+};
+void InstrInfoEmitter::GatherItinClasses() {
+  std::vector<Record*> DefList =
+                          Records.getAllDerivedDefinitions("InstrItinClass");
+  IsItineraries = !DefList.empty();
+  
+  if (!IsItineraries) return;
+  
+  sort(DefList.begin(), DefList.end(), LessRecord());
+
+  for (unsigned i = 0, N = DefList.size(); i < N; i++) {
+    Record *Def = DefList[i];
+    ItinClassMap[Def->getName()] = i;
+  }
+}  
+  
+unsigned InstrInfoEmitter::ItinClassNumber(std::string ItinName) {
+  return ItinClassMap[ItinName];
 }
 
 void InstrInfoEmitter::emitShiftedValue(Record *R, StringInit *Val,

@@ -228,16 +228,14 @@ SDNodeInfo::SDNodeInfo(Record *R) : Def(R) {
   
   // Parse the properties.
   Properties = 0;
-  ListInit *LI = R->getValueAsListInit("Properties");
-  for (unsigned i = 0, e = LI->getSize(); i != e; ++i) {
-    DefInit *DI = dynamic_cast<DefInit*>(LI->getElement(i));
-    assert(DI && "Properties list must be list of defs!");
-    if (DI->getDef()->getName() == "SDNPCommutative") {
+  std::vector<Record*> PropList = R->getValueAsListOfDefs("Properties");
+  for (unsigned i = 0, e = PropList.size(); i != e; ++i) {
+    if (PropList[i]->getName() == "SDNPCommutative") {
       Properties |= 1 << SDNPCommutative;
-    } else if (DI->getDef()->getName() == "SDNPAssociative") {
+    } else if (PropList[i]->getName() == "SDNPAssociative") {
       Properties |= 1 << SDNPAssociative;
     } else {
-      std::cerr << "Unknown SD Node property '" << DI->getDef()->getName()
+      std::cerr << "Unknown SD Node property '" << PropList[i]->getName()
                 << "' on node '" << R->getName() << "'!\n";
       exit(1);
     }
@@ -245,14 +243,9 @@ SDNodeInfo::SDNodeInfo(Record *R) : Def(R) {
   
   
   // Parse the type constraints.
-  ListInit *Constraints = TypeProfile->getValueAsListInit("Constraints");
-  for (unsigned i = 0, e = Constraints->getSize(); i != e; ++i) {
-    assert(dynamic_cast<DefInit*>(Constraints->getElement(i)) &&
-           "Constraints list should contain constraint definitions!");
-    Record *Constraint = 
-      static_cast<DefInit*>(Constraints->getElement(i))->getDef();
-    TypeConstraints.push_back(Constraint);
-  }
+  std::vector<Record*> ConstraintList =
+    TypeProfile->getValueAsListOfDefs("Constraints");
+  TypeConstraints.assign(ConstraintList.begin(), ConstraintList.end());
 }
 
 //===----------------------------------------------------------------------===//
@@ -291,8 +284,13 @@ bool TreePatternNode::UpdateNodeType(unsigned char VT, TreePattern &TP) {
     return true;
   }      
 
-  TP.error("Type inference contradiction found in node " + 
-           getOperator()->getName() + "!");
+  if (isLeaf()) {
+    dump();
+    TP.error("Type inference contradiction found in node!");
+  } else {
+    TP.error("Type inference contradiction found in node " + 
+             getOperator()->getName() + "!");
+  }
   return true; // unreachable
 }
 
@@ -462,10 +460,12 @@ static unsigned char getIntrinsicType(Record *R, bool NotRegisters,
     // Pattern fragment types will be resolved when they are inlined.
     return MVT::isUnknown;
   } else if (R->isSubClassOf("Register")) {
-    assert(0 && "Explicit registers not handled here yet!\n");
+    //const CodeGenTarget &T = TP.getDAGISelEmitter().getTargetInfo();
+    // TODO: if a register appears in exactly one regclass, we could use that
+    // type info.
     return MVT::isUnknown;
-  } else if (R->isSubClassOf("ValueType")) {
-    // Using a VTSDNode.
+  } else if (R->isSubClassOf("ValueType") || R->isSubClassOf("CondCode")) {
+    // Using a VTSDNode or CondCodeSDNode.
     return MVT::Other;
   } else if (R->getName() == "node") {
     // Placeholder.
@@ -482,10 +482,28 @@ static unsigned char getIntrinsicType(Record *R, bool NotRegisters,
 /// exception.
 bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
   if (isLeaf()) {
-    if (DefInit *DI = dynamic_cast<DefInit*>(getLeafValue()))
+    if (DefInit *DI = dynamic_cast<DefInit*>(getLeafValue())) {
       // If it's a regclass or something else known, include the type.
       return UpdateNodeType(getIntrinsicType(DI->getDef(), NotRegisters, TP),
                             TP);
+    } else if (IntInit *II = dynamic_cast<IntInit*>(getLeafValue())) {
+      // Int inits are always integers. :)
+      bool MadeChange = UpdateNodeType(MVT::isInt, TP);
+      
+      if (hasTypeSet()) {
+        unsigned Size = MVT::getSizeInBits(getType());
+        // Make sure that the value is representable for this type.
+        if (Size < 32) {
+          int Val = (II->getValue() << (32-Size)) >> (32-Size);
+          if (Val != II->getValue())
+            TP.error("Sign-extended integer value '" + itostr(II->getValue()) +
+                     "' is out of range for type 'MVT::" + 
+                     getEnumName(getType()) + "'!");
+        }
+      }
+      
+      return MadeChange;
+    }
     return false;
   }
   
@@ -571,19 +589,22 @@ bool TreePatternNode::canPatternMatch(std::string &Reason, DAGISelEmitter &ISE){
 // TreePattern implementation
 //
 
-TreePattern::TreePattern(Record *TheRec, ListInit *RawPat,
+TreePattern::TreePattern(Record *TheRec, ListInit *RawPat, bool isInput,
                          DAGISelEmitter &ise) : TheRecord(TheRec), ISE(ise) {
+   isInputPattern = isInput;
    for (unsigned i = 0, e = RawPat->getSize(); i != e; ++i)
      Trees.push_back(ParseTreePattern((DagInit*)RawPat->getElement(i)));
 }
 
-TreePattern::TreePattern(Record *TheRec, DagInit *Pat,
+TreePattern::TreePattern(Record *TheRec, DagInit *Pat, bool isInput,
                          DAGISelEmitter &ise) : TheRecord(TheRec), ISE(ise) {
+  isInputPattern = isInput;
   Trees.push_back(ParseTreePattern(Pat));
 }
 
-TreePattern::TreePattern(Record *TheRec, TreePatternNode *Pat, 
+TreePattern::TreePattern(Record *TheRec, TreePatternNode *Pat, bool isInput,
                          DAGISelEmitter &ise) : TheRecord(TheRec), ISE(ise) {
+  isInputPattern = isInput;
   Trees.push_back(Pat);
 }
 
@@ -618,6 +639,10 @@ TreePatternNode *TreePattern::ParseTreePattern(DagInit *Dag) {
       New = new TreePatternNode(DI);
     } else if (DagInit *DI = dynamic_cast<DagInit*>(Arg)) {
       New = ParseTreePattern(DI);
+    } else if (IntInit *II = dynamic_cast<IntInit*>(Arg)) {
+      New = new TreePatternNode(II);
+      if (!Dag->getArgName(0).empty())
+        error("Constant int argument should not have a name!");
     } else {
       Arg->dump();
       error("Unknown leaf value for tree pattern!");
@@ -635,6 +660,11 @@ TreePatternNode *TreePattern::ParseTreePattern(DagInit *Dag) {
       !Operator->isSubClassOf("SDNodeXForm") &&
       Operator->getName() != "set")
     error("Unrecognized node '" + Operator->getName() + "'!");
+  
+  //  Check to see if this is something that is illegal in an input pattern.
+  if (isInputPattern && (Operator->isSubClassOf("Instruction") ||
+      Operator->isSubClassOf("SDNodeXForm")))
+    error("Cannot use '" + Operator->getName() + "' in an input pattern!");
   
   std::vector<TreePatternNode*> Children;
   
@@ -663,8 +693,15 @@ TreePatternNode *TreePattern::ParseTreePattern(DagInit *Dag) {
           Args.push_back(Dag->getArgName(i));
         }
       }
+    } else if (IntInit *II = dynamic_cast<IntInit*>(Arg)) {
+      TreePatternNode *Node = new TreePatternNode(II);
+      if (!Dag->getArgName(i).empty())
+        error("Constant int argument should not have a name!");
+      Children.push_back(Node);
     } else {
+      std::cerr << '"';
       Arg->dump();
+      std::cerr << "\": ";
       error("Unknown leaf value for tree pattern!");
     }
   }
@@ -771,7 +808,7 @@ void DAGISelEmitter::ParsePatternFragments(std::ostream &OS) {
   OS << "\n// Predicate functions.\n";
   for (unsigned i = 0, e = Fragments.size(); i != e; ++i) {
     DagInit *Tree = Fragments[i]->getValueAsDag("Fragment");
-    TreePattern *P = new TreePattern(Fragments[i], Tree, *this);
+    TreePattern *P = new TreePattern(Fragments[i], Tree, true, *this);
     PatternFragments[Fragments[i]] = P;
     
     // Validate the argument list, converting it to map, to discard duplicates.
@@ -975,14 +1012,39 @@ void DAGISelEmitter::ParseInstructions() {
   std::vector<Record*> Instrs = Records.getAllDerivedDefinitions("Instruction");
   
   for (unsigned i = 0, e = Instrs.size(); i != e; ++i) {
-    if (!dynamic_cast<ListInit*>(Instrs[i]->getValueInit("Pattern")))
-      continue; // no pattern yet, ignore it.
+    ListInit *LI = 0;
     
-    ListInit *LI = Instrs[i]->getValueAsListInit("Pattern");
-    if (LI->getSize() == 0) continue;  // no pattern.
+    if (dynamic_cast<ListInit*>(Instrs[i]->getValueInit("Pattern")))
+      LI = Instrs[i]->getValueAsListInit("Pattern");
+    
+    // If there is no pattern, only collect minimal information about the
+    // instruction for its operand list.  We have to assume that there is one
+    // result, as we have no detailed info.
+    if (!LI || LI->getSize() == 0) {
+      std::vector<MVT::ValueType> ResultTypes;
+      std::vector<MVT::ValueType> OperandTypes;
+      
+      CodeGenInstruction &InstInfo =Target.getInstruction(Instrs[i]->getName());
+      
+      // Doesn't even define a result?
+      if (InstInfo.OperandList.size() == 0)
+        continue;
+      
+      // Assume the first operand is the result.
+      ResultTypes.push_back(InstInfo.OperandList[0].Ty);
+      
+      // The rest are inputs.
+      for (unsigned j = 1, e = InstInfo.OperandList.size(); j != e; ++j)
+        OperandTypes.push_back(InstInfo.OperandList[j].Ty);
+      
+      // Create and insert the instruction.
+      Instructions.insert(std::make_pair(Instrs[i], 
+                            DAGInstruction(0, ResultTypes, OperandTypes)));
+      continue;  // no pattern.
+    }
     
     // Parse the instruction.
-    TreePattern *I = new TreePattern(Instrs[i], LI, *this);
+    TreePattern *I = new TreePattern(Instrs[i], LI, true, *this);
     // Inline pattern fragments into it.
     I->InlinePatternFragments();
     
@@ -1099,7 +1161,7 @@ void DAGISelEmitter::ParseInstructions() {
     // Use a temporary tree pattern to infer all types and make sure that the
     // constructed result is correct.  This depends on the instruction already
     // being inserted into the Instructions map.
-    TreePattern Temp(I->getRecord(), ResultPattern, *this);
+    TreePattern Temp(I->getRecord(), ResultPattern, false, *this);
     Temp.InferAllTypes();
 
     DAGInstruction &TheInsertedInst = Instructions.find(I->getRecord())->second;
@@ -1112,6 +1174,7 @@ void DAGISelEmitter::ParseInstructions() {
   for (std::map<Record*, DAGInstruction>::iterator II = Instructions.begin(),
        E = Instructions.end(); II != E; ++II) {
     TreePattern *I = II->second.getPattern();
+    if (I == 0) continue;  // No pattern.
     
     if (I->getNumTrees() != 1) {
       std::cerr << "CANNOT HANDLE: " << I->getRecord()->getName() << " yet!";
@@ -1140,7 +1203,7 @@ void DAGISelEmitter::ParsePatterns() {
 
   for (unsigned i = 0, e = Patterns.size(); i != e; ++i) {
     DagInit *Tree = Patterns[i]->getValueAsDag("PatternToMatch");
-    TreePattern *Pattern = new TreePattern(Patterns[i], Tree, *this);
+    TreePattern *Pattern = new TreePattern(Patterns[i], Tree, true, *this);
 
     // Inline pattern fragments into it.
     Pattern->InlinePatternFragments();
@@ -1154,7 +1217,7 @@ void DAGISelEmitter::ParsePatterns() {
     if (LI->getSize() == 0) continue;  // no pattern.
     
     // Parse the instruction.
-    TreePattern *Result = new TreePattern(Patterns[i], LI, *this);
+    TreePattern *Result = new TreePattern(Patterns[i], LI, false, *this);
     
     // Inline pattern fragments into it.
     Result->InlinePatternFragments();
@@ -1437,6 +1500,9 @@ static unsigned getPatternSize(TreePatternNode *P) {
     TreePatternNode *Child = P->getChild(i);
     if (!Child->isLeaf() && Child->getExtType() != MVT::Other)
       Size += getPatternSize(Child);
+    else if (Child->isLeaf() && dynamic_cast<IntInit*>(Child->getLeafValue())) {
+      ++Size;  // Matches a ConstantSDNode.
+    }
   }
   
   return Size;
@@ -1477,7 +1543,16 @@ void DAGISelEmitter::EmitMatchForPattern(TreePatternNode *N,
                                          const std::string &RootName,
                                      std::map<std::string,std::string> &VarMap,
                                          unsigned PatternNo, std::ostream &OS) {
-  assert(!N->isLeaf() && "Cannot match against a leaf!");
+  if (N->isLeaf()) {
+    if (IntInit *II = dynamic_cast<IntInit*>(N->getLeafValue())) {
+      OS << "      if (cast<ConstantSDNode>(" << RootName
+         << ")->getSignExtended() != " << II->getValue() << ")\n"
+         << "        goto P" << PatternNo << "Fail;\n";
+      return;
+    }
+    assert(0 && "Cannot match this as a leaf value!");
+    abort();
+  }
   
   // If this node has a name associated with it, capture it in VarMap.  If
   // we already saw this in the pattern, emit code to verify dagness.
@@ -1527,15 +1602,29 @@ void DAGISelEmitter::EmitMatchForPattern(TreePatternNode *N,
       }
       
       // Handle leaves of various types.
-      Init *LeafVal = Child->getLeafValue();
-      Record *LeafRec = dynamic_cast<DefInit*>(LeafVal)->getDef();
-      if (LeafRec->isSubClassOf("RegisterClass")) {
-        // Handle register references.  Nothing to do here.
-      } else if (LeafRec->isSubClassOf("ValueType")) {
-        // Make sure this is the specified value type.
-        OS << "      if (cast<VTSDNode>(" << RootName << i << ")->getVT() != "
-           << "MVT::" << LeafRec->getName() << ") goto P" << PatternNo
-           << "Fail;\n";
+      if (DefInit *DI = dynamic_cast<DefInit*>(Child->getLeafValue())) {
+        Record *LeafRec = DI->getDef();
+        if (LeafRec->isSubClassOf("RegisterClass")) {
+          // Handle register references.  Nothing to do here.
+        } else if (LeafRec->isSubClassOf("ValueType")) {
+          // Make sure this is the specified value type.
+          OS << "      if (cast<VTSDNode>(" << RootName << i << ")->getVT() != "
+          << "MVT::" << LeafRec->getName() << ") goto P" << PatternNo
+          << "Fail;\n";
+        } else if (LeafRec->isSubClassOf("CondCode")) {
+          // Make sure this is the specified cond code.
+          OS << "      if (cast<CondCodeSDNode>(" << RootName << i
+             << ")->get() != " << "ISD::" << LeafRec->getName()
+             << ") goto P" << PatternNo << "Fail;\n";
+        } else {
+          Child->dump();
+          assert(0 && "Unknown leaf type!");
+        }
+      } else if (IntInit *II = dynamic_cast<IntInit*>(Child->getLeafValue())) {
+        OS << "      if (!isa<ConstantSDNode>(" << RootName << i << ") ||\n"
+           << "          cast<ConstantSDNode>(" << RootName << i
+           << ")->getSignExtended() != " << II->getValue() << ")\n"
+           << "        goto P" << PatternNo << "Fail;\n";
       } else {
         Child->dump();
         assert(0 && "Unknown leaf type!");
@@ -1589,6 +1678,25 @@ CodeGenPatternResult(TreePatternNode *N, unsigned &Ctr,
   }
   
   if (N->isLeaf()) {
+    // If this is an explicit register reference, handle it.
+    if (DefInit *DI = dynamic_cast<DefInit*>(N->getLeafValue())) {
+      unsigned ResNo = Ctr++;
+      if (DI->getDef()->isSubClassOf("Register")) {
+        OS << "      SDOperand Tmp" << ResNo << " = CurDAG->getRegister("
+           << getQualifiedName(DI->getDef()) << ", MVT::"
+           << getEnumName(N->getType())
+           << ");\n";
+        return ResNo;
+      }
+    } else if (IntInit *II = dynamic_cast<IntInit*>(N->getLeafValue())) {
+      unsigned ResNo = Ctr++;
+      OS << "      SDOperand Tmp" << ResNo << " = CurDAG->getTargetConstant("
+         << II->getValue() << ", MVT::"
+        << getEnumName(N->getType())
+        << ");\n";
+      return ResNo;
+    }
+    
     N->dump();
     assert(0 && "Unknown leaf type!");
     return ~0U;
@@ -1683,6 +1791,12 @@ static bool InsertOneTypeCheck(TreePatternNode *Pat, TreePatternNode *Other,
                            Prefix + utostr(i), PatternNo, OS))
       return true;
   return false;
+}
+
+Record *DAGISelEmitter::getSDNodeNamed(const std::string &Name) const {
+  Record *N = Records.getDef(Name);
+  assert(N && N->isSubClassOf("SDNode") && "Bad argument");
+  return N;
 }
 
 /// EmitCodeForPattern - Given a pattern to match, emit code to the specified
@@ -1785,14 +1899,52 @@ void DAGISelEmitter::EmitInstructionSelector(std::ostream &OS) {
      << "    SDOperand Tmp0 = Select(N.getOperand(0));\n"
      << "    if (!N.Val->hasOneUse()) CodeGenMap[N] = Tmp0;\n"
      << "    return Tmp0;\n"
+     << "  }\n"
+     << "  case ISD::TokenFactor:\n"
+     << "    if (N.getNumOperands() == 2) {\n"
+     << "      SDOperand Op0 = Select(N.getOperand(0));\n"
+     << "      SDOperand Op1 = Select(N.getOperand(1));\n"
+     << "      return CodeGenMap[N] =\n"
+     << "          CurDAG->getNode(ISD::TokenFactor, MVT::Other, Op0, Op1);\n"
+     << "    } else {\n"
+     << "      std::vector<SDOperand> Ops;\n"
+     << "      for (unsigned i = 0, e = N.getNumOperands(); i != e; ++i)\n"
+     << "        Ops.push_back(Select(N.getOperand(i)));\n"
+     << "       return CodeGenMap[N] = \n"
+     << "               CurDAG->getNode(ISD::TokenFactor, MVT::Other, Ops);\n"
+     << "    }\n"
+     << "  case ISD::CopyFromReg: {\n"
+     << "    SDOperand Chain = Select(N.getOperand(0));\n"
+     << "    if (Chain == N.getOperand(0)) return N; // No change\n"
+     << "    SDOperand New = CurDAG->getCopyFromReg(Chain,\n"
+     << "                    cast<RegisterSDNode>(N.getOperand(1))->getReg(),\n"
+     << "                                         N.Val->getValueType(0));\n"
+     << "    return New.getValue(N.ResNo);\n"
+     << "  }\n"
+     << "  case ISD::CopyToReg: {\n"
+     << "    SDOperand Chain = Select(N.getOperand(0));\n"
+     << "    SDOperand Reg = N.getOperand(1);\n"
+     << "    SDOperand Val = Select(N.getOperand(2));\n"
+     << "    return CodeGenMap[N] = \n"
+     << "                   CurDAG->getNode(ISD::CopyToReg, MVT::Other,\n"
+     << "                                   Chain, Reg, Val);\n"
      << "  }\n";
     
   // Group the patterns by their top-level opcodes.
   std::map<Record*, std::vector<PatternToMatch*>,
            CompareByRecordName> PatternsByOpcode;
   for (unsigned i = 0, e = PatternsToMatch.size(); i != e; ++i)
-    PatternsByOpcode[PatternsToMatch[i].first->getOperator()]
-      .push_back(&PatternsToMatch[i]);
+    if (!PatternsToMatch[i].first->isLeaf()) {
+      PatternsByOpcode[PatternsToMatch[i].first->getOperator()]
+         .push_back(&PatternsToMatch[i]);
+    } else {
+      if (IntInit *II = 
+             dynamic_cast<IntInit*>(PatternsToMatch[i].first->getLeafValue())) {
+        PatternsByOpcode[getSDNodeNamed("imm")].push_back(&PatternsToMatch[i]);
+      } else {
+        assert(0 && "Unknown leaf value");
+      }
+    }
   
   // Loop over all of the case statements.
   for (std::map<Record*, std::vector<PatternToMatch*>,

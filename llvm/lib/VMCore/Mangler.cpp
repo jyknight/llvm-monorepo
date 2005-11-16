@@ -12,8 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Mangler.h"
+#include "llvm/DerivedTypes.h"
 #include "llvm/Module.h"
-#include "llvm/Type.h"
 #include "llvm/ADT/StringExtras.h"
 using namespace llvm;
 
@@ -22,7 +22,8 @@ static char HexDigit(int V) {
 }
 
 static std::string MangleLetter(unsigned char C) {
-  return std::string("_")+HexDigit(C >> 4) + HexDigit(C & 15) + "_";
+  char Result[] = { '_', HexDigit(C >> 4), HexDigit(C & 15), '_', 0 };
+  return Result;
 }
 
 /// makeNameProper - We don't want identifier names non-C-identifier characters
@@ -30,24 +31,71 @@ static std::string MangleLetter(unsigned char C) {
 ///
 std::string Mangler::makeNameProper(const std::string &X, const char *Prefix) {
   std::string Result;
-
-  // If X does not start with (char)1, add the prefix.
-  std::string::const_iterator I = X.begin();
-  if (*I != 1)
-    Result = Prefix;
-  else
-    ++I;  // Skip over the marker.
+  if (X.empty()) return X;  // Empty names are uniqued by the caller.
   
-  // Mangle the first letter specially, don't allow numbers...
-  if (*I >= '0' && *I <= '9')
-    Result += MangleLetter(*I++);
-
-  for (std::string::const_iterator E = X.end(); I != E; ++I)
-    if ((*I < 'a' || *I > 'z') && (*I < 'A' || *I > 'Z') &&
-        (*I < '0' || *I > '9') && *I != '_' && *I != '$')
-      Result += MangleLetter(*I);
+  if (!UseQuotes) {
+    // If X does not start with (char)1, add the prefix.
+    std::string::const_iterator I = X.begin();
+    if (*I != 1)
+      Result = Prefix;
     else
-      Result += *I;
+      ++I;  // Skip over the marker.
+    
+    // Mangle the first letter specially, don't allow numbers.
+    if (*I >= '0' && *I <= '9')
+      Result += MangleLetter(*I++);
+
+    for (std::string::const_iterator E = X.end(); I != E; ++I) {
+      if (!isCharAcceptable(*I))
+        Result += MangleLetter(*I);
+      else
+        Result += *I;
+    }
+  } else {
+    bool NeedsQuotes = false;
+    
+    std::string::const_iterator I = X.begin();
+    if (*I == 1)
+      ++I;  // Skip over the marker.
+
+    // If the first character is a number, we need quotes.
+    if (*I >= '0' && *I <= '9')
+      NeedsQuotes = true;
+    
+    // Do an initial scan of the string, checking to see if we need quotes or
+    // to escape a '"' or not.
+    if (!NeedsQuotes)
+      for (std::string::const_iterator E = X.end(); I != E; ++I)
+        if (!isCharAcceptable(*I)) {
+          NeedsQuotes = true;
+          break;
+        }
+    
+    // In the common case, we don't need quotes.  Handle this quickly.
+    if (!NeedsQuotes) {
+      if (*X.begin() != 1)
+        return Prefix+X;
+      else
+        return X.substr(1);
+    }
+    
+    // Otherwise, construct the string the expensive way.
+    I = X.begin();
+    
+    // If X does not start with (char)1, add the prefix.
+    if (*I != 1)
+      Result = Prefix;
+    else
+      ++I;   // Skip the marker if present.
+      
+    for (std::string::const_iterator E = X.end(); I != E; ++I) {
+      if (*I == '"')
+        Result += "_QQ_";
+      else
+        Result += *I;
+    }
+    Result = '"' + Result + '"';
+  }
   return Result;
 }
 
@@ -59,48 +107,50 @@ unsigned Mangler::getTypeID(const Type *Ty) {
   return E;
 }
 
-
 std::string Mangler::getValueName(const Value *V) {
+  if (const GlobalValue *GV = dyn_cast<GlobalValue>(V))
+    return getValueName(GV);
+  
+  std::string &Name = Memo[V];
+  if (!Name.empty())
+    return Name;       // Return the already-computed name for V.
+  
+  // Always mangle local names.
+  Name = "ltmp_" + utostr(Count++) + "_" + utostr(getTypeID(V->getType()));
+  return Name;
+}
+
+
+std::string Mangler::getValueName(const GlobalValue *GV) {
   // Check to see whether we've already named V.
-  ValueMap::iterator VI = Memo.find(V);
-  if (VI != Memo.end()) {
-    return VI->second; // Return the old name for V.
-  }
+  std::string &Name = Memo[GV];
+  if (!Name.empty())
+    return Name;       // Return the already-computed name for V.
 
-  std::string name;
-  if (V->hasName()) { // Print out the label if it exists...
-    // Name mangling occurs as follows:
-    // - If V is an intrinsic function, do not change name at all
-    // - If V is not a global, mangling always occurs.
-    // - Otherwise, mangling occurs when any of the following are true:
-    //   1) V has internal linkage
-    //   2) V's name would collide if it is not mangled.
-    //
-    const GlobalValue* gv = dyn_cast<GlobalValue>(V);
-    if (gv && isa<Function>(gv) && cast<Function>(gv)->getIntrinsicID()) {
-      name = gv->getName(); // Is an intrinsic function
-    } else if (gv && !gv->hasInternalLinkage() && !MangledGlobals.count(gv)) {
-      name = makeNameProper(gv->getName(), Prefix);
-    } else {
-      // Non-global, or global with internal linkage / colliding name
-      // -> mangle.
-      unsigned TypeUniqueID = getTypeID(V->getType());
-      name = "l" + utostr(TypeUniqueID) + "_" + makeNameProper(V->getName());
-    }
+  // Name mangling occurs as follows:
+  // - If V is an intrinsic function, do not change name at all
+  // - Otherwise, mangling occurs if global collides with existing name.
+  if (isa<Function>(GV) && cast<Function>(GV)->getIntrinsicID()) {
+    Name = GV->getName(); // Is an intrinsic function
+  } else if (!GV->hasName()) {
+    // Must mangle the global into a unique ID.
+    unsigned TypeUniqueID = getTypeID(GV->getType());
+    static unsigned GlobalID = 0;
+    Name = "__unnamed_" + utostr(TypeUniqueID) + "_" + utostr(GlobalID++);
+  } else if (!MangledGlobals.count(GV)) {
+    Name = makeNameProper(GV->getName(), Prefix);
   } else {
-    name = "ltmp_" + utostr(Count++) + "_" + utostr(getTypeID(V->getType()));
+    unsigned TypeUniqueID = getTypeID(GV->getType());
+    Name = "l" + utostr(TypeUniqueID) + "_" + makeNameProper(GV->getName());
   }
 
-  Memo[V] = name;
-  return name;
+  return Name;
 }
 
 void Mangler::InsertName(GlobalValue *GV,
                          std::map<std::string, GlobalValue*> &Names) {
-  if (!GV->hasName()) {   // We must mangle unnamed globals.
-    MangledGlobals.insert(GV);
+  if (!GV->hasName())   // We must mangle unnamed globals.
     return;
-  }
 
   // Figure out if this is already used.
   GlobalValue *&ExistingValue = Names[GV->getName()];
@@ -119,8 +169,25 @@ void Mangler::InsertName(GlobalValue *GV,
 }
 
 
-Mangler::Mangler(Module &m, const char *prefix)
-  : M(m), Prefix(prefix), TypeCounter(0), Count(0) {
+Mangler::Mangler(Module &M, const char *prefix)
+  : Prefix(prefix), UseQuotes(false), Count(0), TypeCounter(0) {
+  std::fill(AcceptableChars, 
+          AcceptableChars+sizeof(AcceptableChars)/sizeof(AcceptableChars[0]),
+            0);
+
+  // Letters and numbers are acceptable.
+  for (unsigned char X = 'a'; X <= 'z'; ++X)
+    markCharAcceptable(X);
+  for (unsigned char X = 'A'; X <= 'Z'; ++X)
+    markCharAcceptable(X);
+  for (unsigned char X = '0'; X <= '9'; ++X)
+    markCharAcceptable(X);
+  
+  // These chars are acceptable.
+  markCharAcceptable('_');
+  markCharAcceptable('$');
+  markCharAcceptable('.');
+    
   // Calculate which global values have names that will collide when we throw
   // away type information.
   std::map<std::string, GlobalValue*> Names;

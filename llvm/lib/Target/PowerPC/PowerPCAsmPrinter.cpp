@@ -43,15 +43,17 @@ using namespace llvm;
 namespace {
   Statistic<> EmittedInsts("asm-printer", "Number of machine instrs printed");
 
-  struct PPCAsmPrinter : public AsmPrinter {
+  class PPCAsmPrinter : public AsmPrinter {
+    std::string CurSection;
+  public:
     std::set<std::string> FnStubs, GVStubs, LinkOnceStubs;
-
+    
     PPCAsmPrinter(std::ostream &O, TargetMachine &TM)
-      : AsmPrinter(O, TM), LabelNumber(0) {}
+      : AsmPrinter(O, TM), FunctionNumber(0) {}
 
     /// Unique incrementer for label values for referencing Global values.
     ///
-    unsigned LabelNumber;
+    unsigned FunctionNumber;
 
     virtual const char *getPassName() const {
       return "PowerPC Assembly Printer";
@@ -61,6 +63,24 @@ namespace {
       return static_cast<PPCTargetMachine&>(TM);
     }
 
+    /// SwitchSection - Switch to the specified section of the executable if we
+    /// are not already in it!
+    ///
+    void SwitchSection(const char *NewSection, const GlobalValue *GV) {
+      std::string NS;
+      
+      if (GV && GV->hasSection())
+        NS = ".section " + GV->getSection();
+      else
+        NS = NewSection;
+      
+      if (CurSection != NS) {
+        CurSection = NS;
+        if (!CurSection.empty())
+          O << "\t" << CurSection << "\n";
+      }
+    }
+    
     unsigned enumRegToMachineReg(unsigned enumReg) {
       switch (enumReg) {
       default: assert(0 && "Unhandled register!"); break;
@@ -135,8 +155,8 @@ namespace {
     void printPICLabel(const MachineInstr *MI, unsigned OpNo,
                        MVT::ValueType VT) {
       // FIXME: should probably be converted to cout.width and cout.fill
-      O << "\"L0000" << LabelNumber << "$pb\"\n";
-      O << "\"L0000" << LabelNumber << "$pb\":";
+      O << "\"L0000" << FunctionNumber << "$pb\"\n";
+      O << "\"L0000" << FunctionNumber << "$pb\":";
     }
     void printSymbolHi(const MachineInstr *MI, unsigned OpNo,
                        MVT::ValueType VT) {
@@ -146,7 +166,7 @@ namespace {
         O << "ha16(";
         printOp(MI->getOperand(OpNo));
         if (PICEnabled)
-          O << "-\"L0000" << LabelNumber << "$pb\")";
+          O << "-\"L0000" << FunctionNumber << "$pb\")";
         else
           O << ')';
       }
@@ -159,7 +179,7 @@ namespace {
         O << "lo16(";
         printOp(MI->getOperand(OpNo));
         if (PICEnabled)
-          O << "-\"L0000" << LabelNumber << "$pb\")";
+          O << "-\"L0000" << FunctionNumber << "$pb\")";
         else
           O << ')';
       }
@@ -210,7 +230,7 @@ namespace {
     AIXAsmPrinter(std::ostream &O, TargetMachine &TM)
       : PPCAsmPrinter(O, TM) {
       CommentString = "#";
-      GlobalPrefix = "_";
+      GlobalPrefix = ".";
       ZeroDirective = "\t.space\t";  // ".space N" emits N zeros.
       Data64bitsDirective = 0;       // we can't emit a 64-bit unit
       AlignmentIsInBytes = false;    // Alignment is by power of 2.
@@ -226,18 +246,6 @@ namespace {
     bool doFinalization(Module &M);
   };
 } // end of anonymous namespace
-
-// SwitchSection - Switch to the specified section of the executable if we are
-// not already in it!
-//
-static void SwitchSection(std::ostream &OS, std::string &CurSection,
-                          const char *NewSection) {
-  if (CurSection != NewSection) {
-    CurSection = NewSection;
-    if (!CurSection.empty())
-      OS << "\t" << NewSection << "\n";
-  }
-}
 
 /// createDarwinAsmPrinterPass - Returns a pass that prints the PPC assembly
 /// code for a MachineFunction to the given output stream, in a format that the
@@ -287,14 +295,13 @@ void PPCAsmPrinter::printOp(const MachineOperand &MO, bool IsCallOp) {
 
   case MachineOperand::MO_MachineBasicBlock: {
     MachineBasicBlock *MBBOp = MO.getMachineBasicBlock();
-    O << "LBB" << Mang->getValueName(MBBOp->getParent()->getFunction())
-      << "_" << MBBOp->getNumber() << "\t; "
+    O << "LBB" << FunctionNumber << "_" << MBBOp->getNumber() << "\t; "
       << MBBOp->getBasicBlock()->getName();
     return;
   }
 
   case MachineOperand::MO_ConstantPoolIndex:
-    O << ".CPI" << CurrentFnName << "_" << MO.getConstantPoolIndex();
+    O << "LCPI" << FunctionNumber << '_' << MO.getConstantPoolIndex();
     return;
 
   case MachineOperand::MO_ExternalSymbol:
@@ -388,9 +395,11 @@ bool DarwinAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   printConstantPool(MF.getConstantPool());
 
   // Print out labels for the function.
-  O << "\t.text\n";
-  emitAlignment(4);
-  O << "\t.globl\t" << CurrentFnName << "\n";
+  const Function *F = MF.getFunction();
+  SwitchSection(".text", F);
+  emitAlignment(4, F);
+  if (!F->hasInternalLinkage())
+    O << "\t.globl\t" << CurrentFnName << "\n";
   O << CurrentFnName << ":\n";
 
   // Print out code for the function.
@@ -398,7 +407,7 @@ bool DarwinAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
        I != E; ++I) {
     // Print a label for the basic block.
     if (I != MF.begin()) {
-      O << "LBB" << CurrentFnName << "_" << I->getNumber() << ":\t";
+      O << "LBB" << FunctionNumber << '_' << I->getNumber() << ":\t";
       if (!I->getBasicBlock()->getName().empty())
         O << CommentString << " " << I->getBasicBlock()->getName();
       O << "\n";
@@ -410,7 +419,7 @@ bool DarwinAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
       printMachineInstruction(II);
     }
   }
-  ++LabelNumber;
+  ++FunctionNumber;
 
   // We didn't modify anything.
   return false;
@@ -428,15 +437,15 @@ void DarwinAsmPrinter::printConstantPool(MachineConstantPool *MCP) {
   if (CP.empty()) return;
 
   for (unsigned i = 0, e = CP.size(); i != e; ++i) {
-    O << "\t.const\n";
+    SwitchSection(".const", 0);
     // FIXME: force doubles to be naturally aligned.  We should handle this
     // more correctly in the future.
     if (Type::DoubleTy == CP[i]->getType())
       emitAlignment(3);
     else
       emitAlignment(TD.getTypeAlignmentShift(CP[i]->getType()));
-    O << ".CPI" << CurrentFnName << "_" << i << ":\t\t\t\t\t" << CommentString
-      << *CP[i] << "\n";
+    O << "LCPI" << FunctionNumber << '_' << i << ":\t\t\t\t\t" << CommentString
+      << *CP[i] << '\n';
     emitGlobalConstant(CP[i]);
   }
 }
@@ -444,16 +453,20 @@ void DarwinAsmPrinter::printConstantPool(MachineConstantPool *MCP) {
 bool DarwinAsmPrinter::doInitialization(Module &M) {
   if (TM.getSubtarget<PPCSubtarget>().isGigaProcessor())
     O << "\t.machine ppc970\n";
+  SwitchSection("", 0);
   AsmPrinter::doInitialization(M);
+  
+  // Darwin wants symbols to be quoted if they have complex names.
+  Mang->setUseQuotes(true);
   return false;
 }
 
 bool DarwinAsmPrinter::doFinalization(Module &M) {
   const TargetData &TD = TM.getTargetData();
-  std::string CurSection;
 
   // Print out module-level global variables here.
-  for (Module::const_global_iterator I = M.global_begin(), E = M.global_end(); I != E; ++I)
+  for (Module::const_global_iterator I = M.global_begin(), E = M.global_end();
+       I != E; ++I)
     if (I->hasInitializer()) {   // External global require no code
       O << '\n';
       std::string name = Mang->getValueName(I);
@@ -464,7 +477,7 @@ bool DarwinAsmPrinter::doFinalization(Module &M) {
       if (C->isNullValue() && /* FIXME: Verify correct */
           (I->hasInternalLinkage() || I->hasWeakLinkage() ||
            I->hasLinkOnceLinkage())) {
-        SwitchSection(O, CurSection, ".data");
+        SwitchSection(".data", I);
         if (Size == 0) Size = 1;   // .comm Foo, 0 is undefined, avoid it.
         if (I->hasInternalLinkage())
           O << ".lcomm " << name << "," << Size << "," << Align;
@@ -474,6 +487,7 @@ bool DarwinAsmPrinter::doFinalization(Module &M) {
       } else {
         switch (I->getLinkage()) {
         case GlobalValue::LinkOnceLinkage:
+          SwitchSection("", 0);
           O << ".section __TEXT,__textcoal_nt,coalesced,no_toc\n"
             << ".weak_definition " << name << '\n'
             << ".private_extern " << name << '\n'
@@ -492,14 +506,14 @@ bool DarwinAsmPrinter::doFinalization(Module &M) {
           O << "\t.globl " << name << "\n";
           // FALL THROUGH
         case GlobalValue::InternalLinkage:
-          SwitchSection(O, CurSection, ".data");
+          SwitchSection(".data", I);
           break;
-        case GlobalValue::GhostLinkage:
-          std::cerr << "Error: unmaterialized (GhostLinkage) function in asm!";
+        default:
+          std::cerr << "Unknown linkage type!";
           abort();
         }
 
-        emitAlignment(Align);
+        emitAlignment(Align, I);
         O << name << ":\t\t\t\t; '" << I->getName() << "'\n";
         emitGlobalConstant(C);
       }
@@ -566,6 +580,13 @@ bool DarwinAsmPrinter::doFinalization(Module &M) {
       << "\t.long\t" << *i << '\n';
   }
 
+  // Funny Darwin hack: This flag tells the linker that no global symbols
+  // contain code that falls through to other global symbols (e.g. the obvious
+  // implementation of multiple entry points).  If this doesn't occur, the
+  // linker can safely perform dead code stripping.  Since LLVM never generates
+  // code that does this, it is always safe to set.
+  O << "\t.subsections_via_symbols\n";
+
   AsmPrinter::doFinalization(M);
   return false; // success
 }
@@ -594,8 +615,8 @@ bool AIXAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   for (MachineFunction::const_iterator I = MF.begin(), E = MF.end();
        I != E; ++I) {
     // Print a label for the basic block.
-    O << "LBB" << CurrentFnName << "_" << I->getNumber() << ":\t# "
-      << I->getBasicBlock()->getName() << "\n";
+    O << "LBB" << CurrentFnName << '_' << I->getNumber() << ":\t# "
+      << I->getBasicBlock()->getName() << '\n';
     for (MachineBasicBlock::const_iterator II = I->begin(), E = I->end();
       II != E; ++II) {
       // Print the assembly for the instruction.
@@ -603,7 +624,7 @@ bool AIXAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
       printMachineInstruction(II);
     }
   }
-  ++LabelNumber;
+  ++FunctionNumber;
 
   O << "LT.." << CurrentFnName << ":\n"
     << "\t.long 0\n"
@@ -629,18 +650,18 @@ void AIXAsmPrinter::printConstantPool(MachineConstantPool *MCP) {
   if (CP.empty()) return;
 
   for (unsigned i = 0, e = CP.size(); i != e; ++i) {
-    O << "\t.const\n";
+    SwitchSection(".const", 0);
     O << "\t.align " << (unsigned)TD.getTypeAlignment(CP[i]->getType())
       << "\n";
-    O << ".CPI" << CurrentFnName << "_" << i << ":\t\t\t\t\t;"
-      << *CP[i] << "\n";
+    O << "LCPI" << FunctionNumber << '_' << i << ":\t\t\t\t\t;"
+      << *CP[i] << '\n';
     emitGlobalConstant(CP[i]);
   }
 }
 
 bool AIXAsmPrinter::doInitialization(Module &M) {
+  SwitchSection("", 0);
   const TargetData &TD = TM.getTargetData();
-  std::string CurSection;
 
   O << "\t.machine \"ppc64\"\n"
     << "\t.toc\n"
@@ -675,7 +696,7 @@ bool AIXAsmPrinter::doInitialization(Module &M) {
       continue;
 
     std::string Name = GV->getName();
-    std::string Label = "LC.." + utostr(LabelNumber++);
+    std::string Label = "LC.." + utostr(FunctionNumber++);
     GVToLabelMap[GV] = Label;
     O << Label << ":\n"
       << "\t.tc " << Name << "[TC]," << Name;
@@ -683,7 +704,7 @@ bool AIXAsmPrinter::doInitialization(Module &M) {
     O << '\n';
   }
 
-  Mang = new Mangler(M, ".");
+  AsmPrinter::doInitialization(M);
   return false; // success
 }
 
@@ -710,7 +731,6 @@ bool AIXAsmPrinter::doFinalization(Module &M) {
   O << "_section_.text:\n"
     << "\t.csect .data[RW],3\n"
     << "\t.llong _section_.text\n";
-
-  delete Mang;
+  AsmPrinter::doFinalization(M);
   return false; // success
 }

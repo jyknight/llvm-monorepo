@@ -67,6 +67,7 @@ typedef u_int64_t uint64_t;
 // Visual C++ doesn't provide standard integer headers, but it does provide
 // built-in data types.
 #include <stddef.h>
+#include <sys/types.h>
 typedef __int64 int64_t;
 typedef unsigned __int64 uint64_t;
 typedef signed int int32_t;
@@ -96,6 +97,12 @@ typedef signed int ssize_t;
 #endif
 #if !defined(UINT64_MAX)
 # define UINT64_MAX 0xffffffffffffffffULL
+#endif
+
+#if __GNUC__ > 3
+#define END_WITH_NULL __attribute__((sentinel))
+#else
+#define END_WITH_NULL
 #endif
 
 #endif  /* SUPPORT_DATATYPES_H */

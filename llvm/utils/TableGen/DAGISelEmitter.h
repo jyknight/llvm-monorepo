@@ -226,7 +226,7 @@ namespace llvm {
     /// ContainsUnresolvedType - Return true if this tree contains any
     /// unresolved types.
     bool ContainsUnresolvedType() const {
-      if (Ty == MVT::LAST_VALUETYPE) return true;
+      if (!hasTypeSet()) return true;
       for (unsigned i = 0, e = getNumChildren(); i != e; ++i)
         if (getChild(i)->ContainsUnresolvedType()) return true;
       return false;
@@ -258,13 +258,20 @@ namespace llvm {
     /// ISE - the DAG isel emitter coordinating this madness.
     ///
     DAGISelEmitter &ISE;
+
+    /// isInputPattern - True if this is an input pattern, something to match.
+    /// False if this is an output pattern, something to emit.
+    bool isInputPattern;
   public:
       
     /// TreePattern constructor - Parse the specified DagInits into the
     /// current record.
-    TreePattern(Record *TheRec, ListInit *RawPat, DAGISelEmitter &ise);
-    TreePattern(Record *TheRec, DagInit *Pat, DAGISelEmitter &ise);
-    TreePattern(Record *TheRec, TreePatternNode *Pat, DAGISelEmitter &ise);
+    TreePattern(Record *TheRec, ListInit *RawPat, bool isInput,
+                DAGISelEmitter &ise);
+    TreePattern(Record *TheRec, DagInit *Pat, bool isInput,
+                DAGISelEmitter &ise);
+    TreePattern(Record *TheRec, TreePatternNode *Pat, bool isInput,
+                DAGISelEmitter &ise);
         
     /// getTrees - Return the tree patterns which corresponds to this pattern.
     ///
@@ -374,6 +381,8 @@ public:
   void run(std::ostream &OS);
   
   const CodeGenTarget &getTargetInfo() const { return Target; }
+  
+  Record *getSDNodeNamed(const std::string &Name) const;
   
   const SDNodeInfo &getSDNodeInfo(Record *R) const {
     assert(SDNodes.count(R) && "Unknown node!");
