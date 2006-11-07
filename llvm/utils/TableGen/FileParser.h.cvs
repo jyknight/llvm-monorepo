@@ -1,0 +1,39 @@
+typedef union {
+  std::string*                StrVal;
+  int                         IntVal;
+  llvm::RecTy*                Ty;
+  llvm::Init*                 Initializer;
+  std::vector<llvm::Init*>*   FieldList;
+  std::vector<unsigned>*      BitList;
+  llvm::Record*               Rec;
+  std::vector<llvm::Record*>* RecList;
+  SubClassRefTy*              SubClassRef;
+  std::vector<SubClassRefTy>* SubClassList;
+  std::vector<std::pair<llvm::Init*, std::string> >* DagValueList;
+} YYSTYPE;
+#define	INT	257
+#define	BIT	258
+#define	STRING	259
+#define	BITS	260
+#define	LIST	261
+#define	CODE	262
+#define	DAG	263
+#define	CLASS	264
+#define	DEF	265
+#define	MULTICLASS	266
+#define	DEFM	267
+#define	FIELD	268
+#define	LET	269
+#define	IN	270
+#define	SHLTOK	271
+#define	SRATOK	272
+#define	SRLTOK	273
+#define	STRCONCATTOK	274
+#define	INTVAL	275
+#define	ID	276
+#define	VARNAME	277
+#define	STRVAL	278
+#define	CODEFRAGMENT	279
+
+
+extern YYSTYPE Filelval;

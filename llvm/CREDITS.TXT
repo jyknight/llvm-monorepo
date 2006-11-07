@@ -1,0 +1,182 @@
+This file is a partial list of people who have contributed to the LLVM
+project.  If you have contributed a patch or made some other contribution to
+LLVM, please submit a patch to this file to add yourself, and it will be 
+done!
+
+The list is sorted by name and formatted to allow easy grepping and
+beautification by scripts.  The fields are: name (N), email (E), web-address
+(W), PGP key ID and fingerprint (P), description (D), and snail-mail address
+(S).
+
+N: Vikram Adve
+E: vadve@cs.uiuc.edu
+W: http://www.cs.uiuc.edu/~vadve/
+D: The Sparc64 backend, provider of much wisdom, and motivator for LLVM
+
+N: Owen Anderson
+E: resistor@mac.com
+D: LCSSA pass and related LoopUnswitch work, TargetData refactoring, random improvements
+
+N: Henrik Bach
+D: MingW Win32 API portability layer
+
+N: Nate Begeman
+E: natebegeman@mac.com
+D: PowerPC backend developer
+D: Target-independent code generator and analysis improvements
+
+N: Daniel Berlin
+E: dberlin@dberlin.org
+D: ET-Forest implementation.
+
+N: Misha Brukman
+E: brukman+llvm@uiuc.edu
+W: http://misha.brukman.net
+D: Portions of X86 and Sparc JIT compilers, PowerPC backend
+D: Incremental bytecode loader
+
+N: Cameron Buschardt
+E: buschard@uiuc.edu
+D: The `mem2reg' pass - promotes values stored in memory to registers
+
+N: Casey Carter
+E: ccarter@uiuc.edu
+D: Fixes to the Reassociation pass, various improvement patches
+
+N: Evan Cheng
+E: evan.cheng@apple.com
+D: X86 backend developer
+D: Instruction scheduler improvements
+D: Loop optimizer improvements
+D: Target-independent code generator improvements
+
+N: Jeff Cohen
+E: jeffc@jolt-lang.org
+W: http://jolt-lang.org
+D: Native Win32 API portability layer
+
+N: John T. Criswell
+E: criswell@uiuc.edu
+D: Autoconf support, QMTest database, documentation improvements
+
+N: Rafael Avila de Espindola
+E: rafael.espindola@gmail.com
+D: The ARM backend
+
+N: Alkis Evlogimenos
+E: alkis@evlogimenos.com
+D: Linear scan register allocator, many codegen improvements, Java frontend
+
+N: Brian Gaeke
+E: gaeke@uiuc.edu
+W: http://www.students.uiuc.edu/~gaeke/
+D: Portions of X86 static and JIT compilers; initial SparcV8 backend
+D: Dynamic trace optimizer 
+D: FreeBSD/X86 compatibility fixes, the llvm-nm tool
+
+N: Louis Gerbarg
+D: Portions of the PowerPC backend
+
+N: Saem Ghani
+E: saemghani@gmail.com
+D: Callgraph class cleanups
+
+N: Paolo Invernizzi
+E: arathorn@fastwebnet.it
+D: Visual C++ compatibility fixes 
+
+N: Patrick Jenkins
+E: patjenk@wam.umd.edu
+D: Nightly Tester
+
+N: Brad Jones
+E: kungfoomaster@nondot.org
+D: Support for packed types
+
+N: Eric Kidd
+W: http://randomhacks.net/
+D: llvm-config script
+
+N: Anton Korobeynikov
+E: asl@math.spbu.ru
+D: Mingw32 fixes, cross-compiling support, minor changes here and there
+
+N: Sumant Kowshik
+E: kowshik@uiuc.edu
+D: Author of the original C backend
+
+N: Jim Laskey
+E: jlaskey@apple.com
+D: Improvements to the PPC backend, instruction scheduling
+D: Debug and Dwarf implementation
+D: Auto upgrade mangler 
+D: llvm-gcc4 svn wrangler
+
+N: Chris Lattner
+E: sabre@nondot.org
+W: http://nondot.org/~sabre/
+D: Primary architect of LLVM
+
+N: Tanya Lattner (formerly Tanya Brethour)
+E: tonic@nondot.org
+W: http://nondot.org/~tonic/
+D: The initial llvm-ar tool, converted regression testsuite to dejagnu
+D: Modulo scheduling in the SparcV9 backend
+D: Release manager (1.7+)
+
+N: Andrew Lenharth
+E: alenhar2@cs.uiuc.edu
+W: http://www.lenharth.org/~andrewl/
+D: Alpha backend
+D: Sampling based profiling
+
+N: Nick Lewycky
+E: nicholas@mxc.ca
+D: PredicateSimplifier pass
+
+N: Duraid Madina
+E: duraid@octopus.com.au
+W: http://kinoko.c.u-tokyo.ac.jp/~duraid/
+D: IA64 backend
+
+N: Michael McCracken
+E: michael.mccracken@gmail.com
+D: Line number support for llvmgcc
+
+N: Vladimir Merzliakov
+E: wanderer@rsu.ru
+D: Test suite fixes for FreeBSD
+
+N: Morten Ofstad
+E: morten@hue.no
+D: Visual C++ compatibility fixes 
+
+N: Vladimir Prus
+W: http://vladimir_prus.blogspot.com
+E: ghost@cs.msu.su
+D: Made inst_iterator behave like a proper iterator, LowerConstantExprs pass
+
+N: Ruchira Sasanka
+E: sasanka@uiuc.edu
+D: Graph coloring register allocator for the Sparc64 backend
+
+N: Anand Shukla
+E: ashukla@cs.uiuc.edu
+D: The `paths' pass
+
+N: Reid Spencer
+E: rspencer@reidspencer.com
+W: http://reidspencer.com/
+D: Stacker, llvmc, llvm-ld, llvm-ar, llvm2cpp, lib/Archive, lib/Linker, 
+D: lib/System, bytecode enhancements, symtab hacking, unoverloading of 
+D: intrinsics, makefile and configuration system, documentation, various bug 
+D: fixing.
+
+N: Adam Treat
+E: manyoso@yahoo.com
+D: C++ bugs filed, and C++ front-end bug fixes.
+
+N: Bill Wendling
+E: isanbard@gmail.com
+W: http://web.mac.com/bwendling/
+D: The `Lower Setjmp/Longjmp' pass, improvements to the -lowerswitch pass.
