@@ -1,1 +1,0 @@
-__import_module__ diamond_bottom;
